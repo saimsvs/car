@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
 import '../data/backup_service.dart';
+import '../data/notification_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/motion.dart';
@@ -18,14 +19,14 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final v = store.activeVehicle;
-    final initials = store.prefs.displayName.isEmpty
+    final nameParts = store.prefs.displayName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty)
+        .take(2);
+    final initials = nameParts.isEmpty
         ? 'CT'
-        : store.prefs.displayName
-            .trim()
-            .split(RegExp(r'\s+'))
-            .take(2)
-            .map((e) => e[0].toUpperCase())
-            .join();
+        : nameParts.map((e) => e[0].toUpperCase()).join();
 
     return AtmosphericBackground(
       child: SafeArea(
@@ -63,7 +64,7 @@ class SettingsScreen extends StatelessWidget {
                             title: 'Manage vehicles',
                             subtitle: v == null
                                 ? 'No vehicles'
-                                : '${store.vehicles.length} vehicle · ${v.name}',
+                                : '${store.vehicles.length} vehicle${store.vehicles.length == 1 ? '' : 's'} · ${v.name}',
                             onTap: () => _manageVehicles(context, store),
                           ),
                           _SettingRowData(
@@ -84,13 +85,22 @@ class SettingsScreen extends StatelessWidget {
                           _SettingRowData(
                             icon: Icons.notifications_outlined,
                             title: 'Reminders',
-                            subtitle: 'Service & expense alerts',
+                            subtitle: store.prefs.remindersEnabled
+                                ? 'Alerts 3 days before and on the due date'
+                                : 'Service alerts are off',
                             trailing: Switch.adaptive(
                               value: store.prefs.remindersEnabled,
-                              onChanged: (v) => store.setRemindersEnabled(v),
+                              onChanged: (v) =>
+                                  _toggleReminders(context, store, v),
                               activeThumbColor: Colors.white,
                               activeTrackColor: AppColors.teal,
                             ),
+                          ),
+                          _SettingRowData(
+                            icon: Icons.notifications_active_outlined,
+                            title: 'Test notification',
+                            subtitle: 'Check alerts reach this device',
+                            onTap: () => _sendTestNotification(context),
                           ),
                           _SettingRowData(
                             icon: Icons.attach_money_rounded,
@@ -204,6 +214,68 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
+Future<void> _toggleReminders(
+  BuildContext context,
+  AppStore store,
+  bool value,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  if (!value) {
+    await store.setRemindersEnabled(false);
+    return;
+  }
+
+  if (!NotificationService.instance.isSupported) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('This device does not support notifications'),
+      ),
+    );
+    return;
+  }
+
+  final granted = await NotificationService.instance.requestPermission();
+  if (!granted) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Allow notifications in system settings to get reminders',
+        ),
+      ),
+    );
+    return;
+  }
+
+  await store.setRemindersEnabled(true);
+  final pending = await NotificationService.instance.pendingCount();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(
+        pending == 0
+            ? 'Reminders on. Add a reminder to get alerts.'
+            : '$pending alert${pending == 1 ? '' : 's'} scheduled',
+      ),
+    ),
+  );
+}
+
+Future<void> _sendTestNotification(BuildContext context) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final granted = await NotificationService.instance.requestPermission();
+  if (!granted) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Notifications are not permitted yet')),
+    );
+    return;
+  }
+  final sent = await NotificationService.instance.sendTestNotification();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(sent ? 'Test notification sent' : 'Could not send it'),
+    ),
+  );
+}
+
 Future<void> _editProfile(BuildContext context, AppStore store) async {
   final name = TextEditingController(text: store.prefs.displayName);
   final email = TextEditingController(text: store.prefs.email);
@@ -266,33 +338,68 @@ Future<void> _manageVehicles(BuildContext context, AppStore store) async {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (ctx) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Manage vehicles', style: Theme.of(ctx).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            for (final v in store.vehicles)
-              ListTile(
-                leading: Icon(
-                  Icons.directions_car_filled_rounded,
-                  color: v.id == store.activeVehicleId
-                      ? AppColors.teal
-                      : AppColors.muted,
-                ),
-                title: Text(v.name),
-                subtitle: Text(v.subtitle),
-                trailing: v.id == store.activeVehicleId
-                    ? const Text('Active', style: TextStyle(color: AppColors.tealDeep))
-                    : null,
-                onTap: () async {
-                  await store.setActiveVehicle(v.id);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
+    builder: (ctx) => Consumer<AppStore>(
+      builder: (ctx, store, _) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Manage vehicles',
+                      style: Theme.of(ctx).textTheme.titleLarge,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => showVehicleEditor(ctx),
+                    icon: const Icon(Icons.add_rounded),
+                    tooltip: 'Add vehicle',
+                    color: AppColors.tealDeep,
+                  ),
+                ],
               ),
-          ],
+              const SizedBox(height: 4),
+              for (final v in store.vehicles)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.directions_car_filled_rounded,
+                    color: v.id == store.activeVehicleId
+                        ? AppColors.teal
+                        : AppColors.muted,
+                  ),
+                  title: Text(v.name),
+                  subtitle: Text(
+                    v.id == store.activeVehicleId
+                        ? '${v.subtitle} · Active'
+                        : v.subtitle,
+                  ),
+                  onTap: () async {
+                    await store.setActiveVehicle(v.id);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: () => showVehicleEditor(ctx, vehicle: v),
+                        icon: const Icon(Icons.edit_outlined),
+                        tooltip: 'Edit vehicle',
+                      ),
+                      IconButton(
+                        onPressed: () => confirmDeleteVehicle(ctx, v),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        color: AppColors.coral,
+                        tooltip: 'Delete vehicle',
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     ),

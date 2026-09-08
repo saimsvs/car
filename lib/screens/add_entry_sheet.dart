@@ -1,35 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../data/app_store.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 
-Future<void> showAddEntrySheet(BuildContext context) async {
+/// Log a new entry, or edit [existing] when one is supplied.
+Future<void> showAddEntrySheet(
+  BuildContext context, {
+  ExpenseLog? existing,
+}) async {
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (context) => const AddEntrySheet(),
+    builder: (context) => AddEntrySheet(existing: existing),
   );
 }
 
 class AddEntrySheet extends StatefulWidget {
-  const AddEntrySheet({super.key});
+  const AddEntrySheet({super.key, this.existing});
+
+  final ExpenseLog? existing;
 
   @override
   State<AddEntrySheet> createState() => _AddEntrySheetState();
 }
 
 class _AddEntrySheetState extends State<AddEntrySheet> {
-  LogKind _kind = LogKind.fuel;
+  late LogKind _kind;
   final _title = TextEditingController();
   final _amount = TextEditingController();
   final _mileage = TextEditingController();
   final _liters = TextEditingController();
   final _notes = TextEditingController();
-  String _category = 'Fuel';
+  late String _category;
+  late DateTime _date;
   bool _saving = false;
 
   static const _categories = {
@@ -39,13 +47,31 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
     LogKind.income: ['Rideshare', 'Delivery', 'Other'],
   };
 
+  bool get _editing => widget.existing != null;
+
   @override
   void initState() {
     super.initState();
-    final store = context.read<AppStore>();
-    final v = store.activeVehicle;
-    if (v != null) _mileage.text = '${v.mileage}';
-    _title.text = 'Fuel fill-up';
+    final existing = widget.existing;
+    if (existing != null) {
+      _kind = existing.kind;
+      _category = _categories[existing.kind]!.contains(existing.category)
+          ? existing.category
+          : _categories[existing.kind]!.first;
+      _date = existing.date;
+      _title.text = existing.title;
+      _amount.text = existing.amount.toStringAsFixed(2);
+      _mileage.text = existing.mileage?.toString() ?? '';
+      _liters.text = existing.liters?.toString() ?? '';
+      _notes.text = existing.notes;
+    } else {
+      _kind = LogKind.fuel;
+      _category = 'Fuel';
+      _date = DateTime.now();
+      final v = context.read<AppStore>().activeVehicle;
+      if (v != null) _mileage.text = '${v.mileage}';
+      _title.text = 'Fuel fill-up';
+    }
   }
 
   @override
@@ -71,10 +97,20 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
     });
   }
 
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+    );
+    if (picked != null) setState(() => _date = picked);
+  }
+
   Future<void> _save() async {
     final store = context.read<AppStore>();
-    final v = store.activeVehicle;
-    if (v == null) return;
+    final vehicleId = widget.existing?.vehicleId ?? store.activeVehicle?.id;
+    if (vehicleId == null) return;
     final amount = double.tryParse(_amount.text.trim());
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -83,29 +119,63 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
       return;
     }
     setState(() => _saving = true);
-    await store.addLog(
-      ExpenseLog(
-        id: store.newId(),
-        vehicleId: v.id,
-        kind: _kind,
-        title: _title.text.trim().isEmpty ? _category : _title.text.trim(),
-        category: _category,
-        amount: amount,
-        date: DateTime.now(),
-        mileage: int.tryParse(_mileage.text.trim()),
-        liters: double.tryParse(_liters.text.trim()),
-        notes: _notes.text.trim(),
-      ),
+    final entry = ExpenseLog(
+      id: widget.existing?.id ?? store.newId(),
+      vehicleId: vehicleId,
+      kind: _kind,
+      title: _title.text.trim().isEmpty ? _category : _title.text.trim(),
+      category: _category,
+      amount: amount,
+      date: _date,
+      mileage: int.tryParse(_mileage.text.trim()),
+      liters: double.tryParse(_liters.text.trim()),
+      notes: _notes.text.trim(),
     );
+    if (_editing) {
+      await store.updateLog(entry);
+    } else {
+      await store.addLog(entry);
+    }
     if (!mounted) return;
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${_kind.name} saved')),
+      SnackBar(content: Text(_editing ? 'Entry updated' : '${_kind.name} saved')),
+    );
+  }
+
+  Future<void> _delete() async {
+    final store = context.read<AppStore>();
+    final existing = widget.existing;
+    if (existing == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete entry?'),
+        content: Text(existing.title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await store.deleteLog(existing.id);
+    if (!mounted) return;
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Entry deleted')),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final store = context.read<AppStore>();
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
@@ -133,13 +203,26 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                'Log entry',
-                style: GoogleFonts.outfit(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _editing ? 'Edit entry' : 'Log entry',
+                      style: GoogleFonts.outfit(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ),
+                  if (_editing)
+                    IconButton(
+                      onPressed: _saving ? null : _delete,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      color: AppColors.coral,
+                      tooltip: 'Delete entry',
+                    ),
+                ],
               ),
               const SizedBox(height: 4),
               Text(
@@ -179,15 +262,42 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: _field(_amount, 'Amount', keyboard: TextInputType.numberWithOptions(decimal: true))),
+                  Expanded(child: _field(_amount, 'Amount', keyboard: const TextInputType.numberWithOptions(decimal: true))),
                   const SizedBox(width: 10),
                   Expanded(child: _field(_mileage, 'Mileage', keyboard: TextInputType.number)),
                 ],
               ),
               if (_kind == LogKind.fuel) ...[
                 const SizedBox(height: 10),
-                _field(_liters, 'Liters / gallons', keyboard: TextInputType.numberWithOptions(decimal: true)),
+                _field(
+                  _liters,
+                  store.prefs.useMiles ? 'Gallons' : 'Liters',
+                  keyboard: const TextInputType.numberWithOptions(decimal: true),
+                ),
               ],
+              const SizedBox(height: 10),
+              InkWell(
+                onTap: _pickDate,
+                borderRadius: BorderRadius.circular(14),
+                child: InputDecorator(
+                  decoration: _decoration('Date'),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          DateFormat.yMMMd().format(_date),
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.calendar_today_rounded,
+                        size: 18,
+                        color: AppColors.muted,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 10),
               _field(_notes, 'Notes (optional)', maxLines: 2),
               const SizedBox(height: 18),
@@ -209,7 +319,7 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : Text(
-                          'Save',
+                          _editing ? 'Save changes' : 'Save',
                           style: GoogleFonts.dmSans(
                             fontWeight: FontWeight.w700,
                             fontSize: 16,

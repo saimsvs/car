@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import 'notification_service.dart';
 
 class AppStore extends ChangeNotifier {
   static const _key = 'car_track_v1';
@@ -51,6 +52,16 @@ class AppStore extends ChangeNotifier {
     activeVehicleId ??= vehicles.first.id;
     ready = true;
     notifyListeners();
+    await syncNotifications();
+  }
+
+  /// Rebuilds the scheduled notifications from the current reminders.
+  Future<void> syncNotifications() async {
+    await NotificationService.instance.syncReminders(
+      reminders: reminders,
+      vehicleNames: {for (final v in vehicles) v.id: v.name},
+      enabled: prefs.remindersEnabled,
+    );
   }
 
   Future<void> _persist() async {
@@ -178,12 +189,41 @@ class AppStore extends ChangeNotifier {
     }
     notifyListeners();
     await _persist();
+    // Reminder notifications name the vehicle, so a rename changes their text.
+    await syncNotifications();
+  }
+
+  /// Removes a vehicle along with everything logged against it.
+  /// The last vehicle is kept so the app always has something to show.
+  Future<bool> deleteVehicle(String id) async {
+    if (vehicles.length <= 1) return false;
+    vehicles.removeWhere((e) => e.id == id);
+    logs.removeWhere((e) => e.vehicleId == id);
+    reminders.removeWhere((e) => e.vehicleId == id);
+    if (activeVehicleId == id) activeVehicleId = vehicles.first.id;
+    notifyListeners();
+    await _persist();
+    await syncNotifications();
+    return true;
   }
 
   Future<void> addLog(ExpenseLog log) async {
     logs.insert(0, log);
-    if (log.mileage != null && log.mileage! > (activeVehicle?.mileage ?? 0)) {
-      activeVehicle?.mileage = log.mileage!;
+    final i = vehicles.indexWhere((e) => e.id == log.vehicleId);
+    if (i >= 0 && log.mileage != null && log.mileage! > vehicles[i].mileage) {
+      vehicles[i].mileage = log.mileage!;
+    }
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateLog(ExpenseLog log) async {
+    final i = logs.indexWhere((e) => e.id == log.id);
+    if (i < 0) return;
+    logs[i] = log;
+    final v = vehicles.indexWhere((e) => e.id == log.vehicleId);
+    if (v >= 0 && log.mileage != null && log.mileage! > vehicles[v].mileage) {
+      vehicles[v].mileage = log.mileage!;
     }
     notifyListeners();
     await _persist();
@@ -199,17 +239,43 @@ class AppStore extends ChangeNotifier {
     reminders.add(r);
     notifyListeners();
     await _persist();
+    await syncNotifications();
+  }
+
+  Future<void> updateReminder(ReminderItem r) async {
+    final i = reminders.indexWhere((e) => e.id == r.id);
+    if (i < 0) return;
+    reminders[i] = r;
+    notifyListeners();
+    await _persist();
+    await syncNotifications();
+  }
+
+  Future<void> deleteReminder(String id) async {
+    reminders.removeWhere((e) => e.id == id);
+    notifyListeners();
+    await _persist();
+    await syncNotifications();
   }
 
   Future<void> completeReminder(String id) async {
+    await _setReminderDone(id, true);
+  }
+
+  Future<void> reopenReminder(String id) async {
+    await _setReminderDone(id, false);
+  }
+
+  Future<void> _setReminderDone(String id, bool done) async {
     final r = reminders.cast<ReminderItem?>().firstWhere(
           (e) => e!.id == id,
           orElse: () => null,
         );
     if (r == null) return;
-    r.done = true;
+    r.done = done;
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   Future<void> updatePrefs(AppPrefs p) async {
@@ -222,6 +288,7 @@ class AppStore extends ChangeNotifier {
     prefs.remindersEnabled = value;
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   List<ExpenseLog> logsForVehicle([String? vehicleId]) {
@@ -282,25 +349,26 @@ class AppStore extends ChangeNotifier {
     });
   }
 
+  /// Distance per unit of fuel, both in the user's chosen units
+  /// (miles per gallon, or kilometers per liter).
   double? averageMpg() {
     final fuel = logsForVehicle()
         .where((e) => e.kind == LogKind.fuel && e.liters != null && e.mileage != null)
         .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
     if (fuel.length < 2) return null;
-    var totalMiles = 0.0;
-    var totalGal = 0.0;
+    var totalDistance = 0.0;
+    var totalVolume = 0.0;
     for (var i = 1; i < fuel.length; i++) {
       final prev = fuel[i - 1];
       final cur = fuel[i];
-      final miles = (cur.mileage! - prev.mileage!).toDouble();
-      if (miles <= 0 || cur.liters == null || cur.liters! <= 0) continue;
-      final gal = prefs.useMiles ? cur.liters! / 3.785 : cur.liters!;
-      totalMiles += miles;
-      totalGal += gal;
+      final distance = (cur.mileage! - prev.mileage!).toDouble();
+      if (distance <= 0 || cur.liters == null || cur.liters! <= 0) continue;
+      totalDistance += distance;
+      totalVolume += cur.liters!;
     }
-    if (totalGal <= 0) return null;
-    return totalMiles / totalGal;
+    if (totalVolume <= 0) return null;
+    return totalDistance / totalVolume;
   }
 
   double? costPerDistance() {
@@ -341,6 +409,7 @@ class AppStore extends ChangeNotifier {
     }
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   String newId() => _id();
