@@ -186,7 +186,13 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
               ),
               if (_kind == LogKind.fuel) ...[
                 const SizedBox(height: 10),
-                _field(_liters, 'Liters / gallons', keyboard: TextInputType.numberWithOptions(decimal: true)),
+                _field(
+                  _liters,
+                  context.read<AppStore>().prefs.useMiles
+                      ? 'Gallons'
+                      : 'Liters',
+                  keyboard: const TextInputType.numberWithOptions(decimal: true),
+                ),
               ],
               const SizedBox(height: 10),
               _field(_notes, 'Notes (optional)', maxLines: 2),

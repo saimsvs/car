@@ -130,6 +130,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       delay: const Duration(milliseconds: 270),
                       child: _InsightRow(
                         mpg: mpg == null ? '—' : mpg.toStringAsFixed(1),
+                        economyLabel:
+                            store.prefs.useMiles ? 'Avg MPG' : 'Avg km/L',
                         costPer: cpd == null ? '—' : store.money(cpd),
                         unit: store.prefs.useMiles ? 'mile' : 'km',
                       ),
@@ -569,11 +571,13 @@ class _RingPainter extends CustomPainter {
 class _InsightRow extends StatelessWidget {
   const _InsightRow({
     required this.mpg,
+    required this.economyLabel,
     required this.costPer,
     required this.unit,
   });
 
   final String mpg;
+  final String economyLabel;
   final String costPer;
   final String unit;
 
@@ -583,7 +587,7 @@ class _InsightRow extends StatelessWidget {
       children: [
         Expanded(
           child: _InsightCard(
-            title: 'Avg MPG',
+            title: economyLabel,
             value: mpg,
             subtitle: 'From fuel logs',
             icon: Icons.speed_rounded,

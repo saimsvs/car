@@ -18,14 +18,14 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final v = store.activeVehicle;
-    final initials = store.prefs.displayName.isEmpty
+    final nameParts = store.prefs.displayName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty)
+        .take(2);
+    final initials = nameParts.isEmpty
         ? 'CT'
-        : store.prefs.displayName
-            .trim()
-            .split(RegExp(r'\s+'))
-            .take(2)
-            .map((e) => e[0].toUpperCase())
-            .join();
+        : nameParts.map((e) => e[0].toUpperCase()).join();
 
     return AtmosphericBackground(
       child: SafeArea(
@@ -63,7 +63,7 @@ class SettingsScreen extends StatelessWidget {
                             title: 'Manage vehicles',
                             subtitle: v == null
                                 ? 'No vehicles'
-                                : '${store.vehicles.length} vehicle · ${v.name}',
+                                : '${store.vehicles.length} vehicle${store.vehicles.length == 1 ? '' : 's'} · ${v.name}',
                             onTap: () => _manageVehicles(context, store),
                           ),
                           _SettingRowData(

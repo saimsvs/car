@@ -182,8 +182,9 @@ class AppStore extends ChangeNotifier {
 
   Future<void> addLog(ExpenseLog log) async {
     logs.insert(0, log);
-    if (log.mileage != null && log.mileage! > (activeVehicle?.mileage ?? 0)) {
-      activeVehicle?.mileage = log.mileage!;
+    final i = vehicles.indexWhere((e) => e.id == log.vehicleId);
+    if (i >= 0 && log.mileage != null && log.mileage! > vehicles[i].mileage) {
+      vehicles[i].mileage = log.mileage!;
     }
     notifyListeners();
     await _persist();
@@ -202,12 +203,20 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> completeReminder(String id) async {
+    await _setReminderDone(id, true);
+  }
+
+  Future<void> reopenReminder(String id) async {
+    await _setReminderDone(id, false);
+  }
+
+  Future<void> _setReminderDone(String id, bool done) async {
     final r = reminders.cast<ReminderItem?>().firstWhere(
           (e) => e!.id == id,
           orElse: () => null,
         );
     if (r == null) return;
-    r.done = true;
+    r.done = done;
     notifyListeners();
     await _persist();
   }
@@ -282,25 +291,26 @@ class AppStore extends ChangeNotifier {
     });
   }
 
+  /// Distance per unit of fuel, both in the user's chosen units
+  /// (miles per gallon, or kilometers per liter).
   double? averageMpg() {
     final fuel = logsForVehicle()
         .where((e) => e.kind == LogKind.fuel && e.liters != null && e.mileage != null)
         .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
     if (fuel.length < 2) return null;
-    var totalMiles = 0.0;
-    var totalGal = 0.0;
+    var totalDistance = 0.0;
+    var totalVolume = 0.0;
     for (var i = 1; i < fuel.length; i++) {
       final prev = fuel[i - 1];
       final cur = fuel[i];
-      final miles = (cur.mileage! - prev.mileage!).toDouble();
-      if (miles <= 0 || cur.liters == null || cur.liters! <= 0) continue;
-      final gal = prefs.useMiles ? cur.liters! / 3.785 : cur.liters!;
-      totalMiles += miles;
-      totalGal += gal;
+      final distance = (cur.mileage! - prev.mileage!).toDouble();
+      if (distance <= 0 || cur.liters == null || cur.liters! <= 0) continue;
+      totalDistance += distance;
+      totalVolume += cur.liters!;
     }
-    if (totalGal <= 0) return null;
-    return totalMiles / totalGal;
+    if (totalVolume <= 0) return null;
+    return totalDistance / totalVolume;
   }
 
   double? costPerDistance() {

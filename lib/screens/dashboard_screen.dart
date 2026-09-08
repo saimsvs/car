@@ -110,7 +110,7 @@ void _showRemindersSheet(BuildContext context, AppStore store) {
                         await store.completeReminder(r.id);
                         if (ctx.mounted) Navigator.pop(ctx);
                       },
-                      child: const Text('Done'),
+                      child: const Text('Mark done'),
                     ),
                   ),
                 ),
@@ -619,7 +619,7 @@ class _UpcomingList extends StatelessWidget {
       return SurfacePanel(
         onTap: () => showAddEntrySheet(context),
         child: Text(
-          'No upcoming reminders. Tap the car button to log service.',
+          'No upcoming reminders. Tap here to log service.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
       );
@@ -633,7 +633,13 @@ class _UpcomingList extends StatelessWidget {
               await store.completeReminder(item.id);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('${item.title} marked done')),
+                  SnackBar(
+                    content: Text('${item.title} marked done'),
+                    action: SnackBarAction(
+                      label: 'Undo',
+                      onPressed: () => store.reopenReminder(item.id),
+                    ),
+                  ),
                 );
               }
             },
