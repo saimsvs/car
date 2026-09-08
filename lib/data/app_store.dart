@@ -180,11 +180,36 @@ class AppStore extends ChangeNotifier {
     await _persist();
   }
 
+  /// Removes a vehicle along with everything logged against it.
+  /// The last vehicle is kept so the app always has something to show.
+  Future<bool> deleteVehicle(String id) async {
+    if (vehicles.length <= 1) return false;
+    vehicles.removeWhere((e) => e.id == id);
+    logs.removeWhere((e) => e.vehicleId == id);
+    reminders.removeWhere((e) => e.vehicleId == id);
+    if (activeVehicleId == id) activeVehicleId = vehicles.first.id;
+    notifyListeners();
+    await _persist();
+    return true;
+  }
+
   Future<void> addLog(ExpenseLog log) async {
     logs.insert(0, log);
     final i = vehicles.indexWhere((e) => e.id == log.vehicleId);
     if (i >= 0 && log.mileage != null && log.mileage! > vehicles[i].mileage) {
       vehicles[i].mileage = log.mileage!;
+    }
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateLog(ExpenseLog log) async {
+    final i = logs.indexWhere((e) => e.id == log.id);
+    if (i < 0) return;
+    logs[i] = log;
+    final v = vehicles.indexWhere((e) => e.id == log.vehicleId);
+    if (v >= 0 && log.mileage != null && log.mileage! > vehicles[v].mileage) {
+      vehicles[v].mileage = log.mileage!;
     }
     notifyListeners();
     await _persist();
@@ -198,6 +223,20 @@ class AppStore extends ChangeNotifier {
 
   Future<void> addReminder(ReminderItem r) async {
     reminders.add(r);
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateReminder(ReminderItem r) async {
+    final i = reminders.indexWhere((e) => e.id == r.id);
+    if (i < 0) return;
+    reminders[i] = r;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> deleteReminder(String id) async {
+    reminders.removeWhere((e) => e.id == id);
     notifyListeners();
     await _persist();
   }

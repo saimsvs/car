@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/motion.dart';
 import 'add_entry_sheet.dart';
+import 'reminder_actions.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -86,39 +87,84 @@ void _showRemindersSheet(BuildContext context, AppStore store) {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (ctx) {
-      final items = store.openReminders();
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Upcoming care', style: Theme.of(ctx).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              if (items.isEmpty)
-                const Text('No open reminders.')
-              else
-                ...items.map(
-                  (r) => ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(r.title),
-                    subtitle: Text('Due in ${r.daysLeft} days'),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await store.completeReminder(r.id);
-                        if (ctx.mounted) Navigator.pop(ctx);
-                      },
-                      child: const Text('Mark done'),
+    builder: (ctx) => Consumer<AppStore>(
+      builder: (ctx, store, _) {
+        final items = store.openReminders();
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Upcoming care',
+                        style: Theme.of(ctx).textTheme.titleLarge,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => showReminderEditor(ctx),
+                      icon: const Icon(Icons.add_rounded),
+                      tooltip: 'New reminder',
+                      color: AppColors.tealDeep,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                if (items.isEmpty)
+                  const Text('No open reminders.')
+                else
+                  ...items.map(
+                    (r) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(r.title),
+                      subtitle: Text(
+                        r.dueMileage == null
+                            ? 'Due in ${r.daysLeft} days'
+                            : 'Due in ${r.daysLeft} days · '
+                                '${NumberFormat('#,###').format(r.dueMileage)}',
+                      ),
+                      onTap: () => showReminderEditor(ctx, reminder: r),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: () async {
+                              await store.completeReminder(r.id);
+                              if (ctx.mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(
+                                    content: Text('${r.title} marked done'),
+                                    action: SnackBarAction(
+                                      label: 'Undo',
+                                      onPressed: () =>
+                                          store.reopenReminder(r.id),
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            child: const Text('Done'),
+                          ),
+                          IconButton(
+                            onPressed: () => confirmDeleteReminder(ctx, r),
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            color: AppColors.coral,
+                            tooltip: 'Delete reminder',
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
 }
 
@@ -130,33 +176,83 @@ void _showExpensesSheet(BuildContext context, AppStore store) {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (ctx) {
-      final items = store.logsForVehicle();
-      return DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        builder: (_, controller) => ListView(
-          controller: controller,
-          padding: const EdgeInsets.all(20),
-          children: [
-            Text('All expenses', style: Theme.of(ctx).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            ...items.map(
-              (e) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(e.title),
-                subtitle: Text(
-                  '${e.category} · ${DateFormat.yMMMd().format(e.date)}',
-                ),
-                trailing: Text(store.money(e.amount)),
+    builder: (ctx) => Consumer<AppStore>(
+      builder: (ctx, store, _) {
+        final items = store.logsForVehicle();
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          builder: (_, controller) => ListView(
+            controller: controller,
+            padding: const EdgeInsets.all(20),
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'All expenses',
+                      style: Theme.of(ctx).textTheme.titleLarge,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => showAddEntrySheet(ctx),
+                    icon: const Icon(Icons.add_rounded),
+                    tooltip: 'New entry',
+                    color: AppColors.tealDeep,
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
-      );
-    },
+              if (items.isEmpty) const Text('No entries yet.'),
+              ...items.map(
+                (e) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(e.title),
+                  subtitle: Text(
+                    '${e.category} · ${DateFormat.yMMMd().format(e.date)}',
+                  ),
+                  onTap: () => showAddEntrySheet(ctx, existing: e),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(store.money(e.amount)),
+                      IconButton(
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: ctx,
+                            builder: (dialogCtx) => AlertDialog(
+                              title: const Text('Delete entry?'),
+                              content: Text(e.title),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(dialogCtx, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(dialogCtx, true),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok == true) await store.deleteLog(e.id);
+                        },
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        color: AppColors.coral,
+                        tooltip: 'Delete entry',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
   );
 }
 
@@ -617,9 +713,9 @@ class _UpcomingList extends StatelessWidget {
     final items = store.openReminders().take(3).toList();
     if (items.isEmpty) {
       return SurfacePanel(
-        onTap: () => showAddEntrySheet(context),
+        onTap: () => showReminderEditor(context),
         child: Text(
-          'No upcoming reminders. Tap here to log service.',
+          'No upcoming reminders. Tap here to add one.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
       );
@@ -629,7 +725,8 @@ class _UpcomingList extends StatelessWidget {
       children: [
         for (final item in items) ...[
           SurfacePanel(
-            onTap: () async {
+            onTap: () => showReminderEditor(context, reminder: item),
+            onLongPress: () async {
               await store.completeReminder(item.id);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -743,7 +840,7 @@ class _ExpenseList extends StatelessWidget {
           for (var i = 0; i < items.length; i++) ...[
             if (i > 0) const Divider(indent: 70, endIndent: 16),
             ListTile(
-              onTap: () => showAddEntrySheet(context),
+              onTap: () => showAddEntrySheet(context, existing: items[i]),
               onLongPress: () async {
                 final ok = await showDialog<bool>(
                   context: context,

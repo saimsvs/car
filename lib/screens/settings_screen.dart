@@ -266,33 +266,68 @@ Future<void> _manageVehicles(BuildContext context, AppStore store) async {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (ctx) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Manage vehicles', style: Theme.of(ctx).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            for (final v in store.vehicles)
-              ListTile(
-                leading: Icon(
-                  Icons.directions_car_filled_rounded,
-                  color: v.id == store.activeVehicleId
-                      ? AppColors.teal
-                      : AppColors.muted,
-                ),
-                title: Text(v.name),
-                subtitle: Text(v.subtitle),
-                trailing: v.id == store.activeVehicleId
-                    ? const Text('Active', style: TextStyle(color: AppColors.tealDeep))
-                    : null,
-                onTap: () async {
-                  await store.setActiveVehicle(v.id);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
+    builder: (ctx) => Consumer<AppStore>(
+      builder: (ctx, store, _) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Manage vehicles',
+                      style: Theme.of(ctx).textTheme.titleLarge,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => showVehicleEditor(ctx),
+                    icon: const Icon(Icons.add_rounded),
+                    tooltip: 'Add vehicle',
+                    color: AppColors.tealDeep,
+                  ),
+                ],
               ),
-          ],
+              const SizedBox(height: 4),
+              for (final v in store.vehicles)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    Icons.directions_car_filled_rounded,
+                    color: v.id == store.activeVehicleId
+                        ? AppColors.teal
+                        : AppColors.muted,
+                  ),
+                  title: Text(v.name),
+                  subtitle: Text(
+                    v.id == store.activeVehicleId
+                        ? '${v.subtitle} · Active'
+                        : v.subtitle,
+                  ),
+                  onTap: () async {
+                    await store.setActiveVehicle(v.id);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: () => showVehicleEditor(ctx, vehicle: v),
+                        icon: const Icon(Icons.edit_outlined),
+                        tooltip: 'Edit vehicle',
+                      ),
+                      IconButton(
+                        onPressed: () => confirmDeleteVehicle(ctx, v),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        color: AppColors.coral,
+                        tooltip: 'Delete vehicle',
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     ),
