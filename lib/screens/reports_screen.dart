@@ -2,16 +2,84 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
+import '../data/app_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/motion.dart';
 
-class ReportsScreen extends StatelessWidget {
+class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
   @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> {
+  int _periodIndex = 1; // Month default
+
+  (DateTime, DateTime) _range() {
+    final now = DateTime.now();
+    final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    switch (_periodIndex) {
+      case 0:
+        return (now.subtract(const Duration(days: 7)), end);
+      case 2:
+        return (DateTime(now.year, now.month - 2, 1), end);
+      case 3:
+        return (DateTime(now.year - 1, now.month, now.day), end);
+      case 1:
+      default:
+        return (DateTime(now.year, now.month, 1), end);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    final range = _range();
+    final total = store.spendInRange(range.$1, range.$2);
+    final cats = store.categoryTotals(range.$1, range.$2);
+    final fuel = cats['Fuel'] ?? 0;
+    final service = (cats['Service'] ?? 0) +
+        (cats['Oil'] ?? 0) +
+        (cats['Tires'] ?? 0) +
+        (cats['Brakes'] ?? 0) +
+        (cats['Inspection'] ?? 0);
+    final other = total - fuel - service;
+    final prevStart = range.$1.subtract(range.$2.difference(range.$1));
+    final prevTotal = store.spendInRange(prevStart, range.$1);
+    final delta = prevTotal == 0 ? 0.0 : ((total - prevTotal) / prevTotal) * 100;
+    final months = store.lastSixMonthTotals();
+    final maxM = months.fold<double>(1, math.max);
+    final monthLabels = List.generate(6, (i) {
+      final d = DateTime(DateTime.now().year, DateTime.now().month - (5 - i));
+      return DateFormat.MMM().format(d);
+    });
+    final mpg = store.averageMpg();
+    final cpd = store.costPerDistance();
+
+    final catList = <(String, double, Color, String)>[];
+    final palette = [
+      AppColors.teal,
+      AppColors.navy,
+      AppColors.amber,
+      AppColors.coral,
+    ];
+    var pi = 0;
+    final sorted = cats.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    for (final e in sorted.take(4)) {
+      final pct = total <= 0 ? 0.0 : e.value / total;
+      catList.add((e.key, pct, palette[pi % palette.length], store.money(e.value)));
+      pi++;
+    }
+    if (catList.isEmpty) {
+      catList.add(('None', 1, AppColors.line, store.money(0)));
+    }
+
     return AtmosphericBackground(
       child: SafeArea(
         bottom: false,
@@ -28,27 +96,43 @@ class ReportsScreen extends StatelessWidget {
                     const SizedBox(height: 20),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 70),
-                      child: const _PeriodSelector(),
+                      child: _PeriodSelector(
+                        selected: _periodIndex,
+                        onSelect: (i) => setState(() => _periodIndex = i),
+                      ),
                     ),
                     const SizedBox(height: 18),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 120),
-                      child: const _SpendOverview(),
+                      child: _SpendOverview(
+                        total: store.money(total),
+                        delta: delta,
+                        fuel: store.money(fuel),
+                        service: store.money(service < 0 ? 0 : service),
+                        other: store.money(other < 0 ? 0 : other),
+                      ),
                     ),
                     const SizedBox(height: 18),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 170),
-                      child: const _MonthlyBars(),
+                      child: _MonthlyBars(
+                        labels: monthLabels,
+                        values: months.map((e) => e / maxM).toList(),
+                      ),
                     ),
                     const SizedBox(height: 18),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 220),
-                      child: const _CategoryBreakdown(),
+                      child: _CategoryBreakdown(categories: catList),
                     ),
                     const SizedBox(height: 18),
                     FadeSlideIn(
                       delay: const Duration(milliseconds: 270),
-                      child: const _InsightRow(),
+                      child: _InsightRow(
+                        mpg: mpg == null ? '—' : mpg.toStringAsFixed(1),
+                        costPer: cpd == null ? '—' : store.money(cpd),
+                        unit: store.prefs.useMiles ? 'mile' : 'km',
+                      ),
                     ),
                     const SizedBox(height: 110),
                   ],
@@ -86,7 +170,10 @@ class _Header extends StatelessWidget {
 }
 
 class _PeriodSelector extends StatelessWidget {
-  const _PeriodSelector();
+  const _PeriodSelector({required this.selected, required this.onSelect});
+
+  final int selected;
+  final ValueChanged<int> onSelect;
 
   static const periods = ['Week', 'Month', 'Quarter', 'Year'];
 
@@ -99,20 +186,20 @@ class _PeriodSelector extends StatelessWidget {
         itemCount: periods.length,
         separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
-          final selected = index == 1;
+          final isSelected = index == selected;
           return GestureDetector(
-            onTap: () {},
+            onTap: () => onSelect(index),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 18),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: selected
+                color: isSelected
                     ? AppColors.ink
                     : AppColors.surfaceElevated.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(22),
                 border: Border.all(
-                  color: selected ? AppColors.ink : AppColors.line,
+                  color: isSelected ? AppColors.ink : AppColors.line,
                 ),
               ),
               child: Text(
@@ -120,7 +207,7 @@ class _PeriodSelector extends StatelessWidget {
                 style: GoogleFonts.dmSans(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: selected ? Colors.white : AppColors.inkSoft,
+                  color: isSelected ? Colors.white : AppColors.inkSoft,
                 ),
               ),
             ),
@@ -132,10 +219,23 @@ class _PeriodSelector extends StatelessWidget {
 }
 
 class _SpendOverview extends StatelessWidget {
-  const _SpendOverview();
+  const _SpendOverview({
+    required this.total,
+    required this.delta,
+    required this.fuel,
+    required this.service,
+    required this.other,
+  });
+
+  final String total;
+  final double delta;
+  final String fuel;
+  final String service;
+  final String other;
 
   @override
   Widget build(BuildContext context) {
+    final down = delta <= 0;
     return SurfacePanel(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -155,7 +255,7 @@ class _SpendOverview extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '\$1,284',
+                total,
                 style: GoogleFonts.outfit(
                   fontSize: 40,
                   fontWeight: FontWeight.w700,
@@ -170,15 +270,15 @@ class _SpendOverview extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.tealSoft,
+                  color: down ? AppColors.tealSoft : AppColors.coralSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '↓ 8.2%',
+                  '${down ? '↓' : '↑'} ${delta.abs().toStringAsFixed(1)}%',
                   style: GoogleFonts.dmSans(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.tealDeep,
+                    color: down ? AppColors.tealDeep : AppColors.coral,
                   ),
                 ),
               ),
@@ -186,21 +286,15 @@ class _SpendOverview extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'vs last month · March 2026',
+            'vs previous period · ${DateFormat.yMMMM().format(DateTime.now())}',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 20),
           Row(
-            children: const [
-              Expanded(
-                child: _MiniStat(label: 'Fuel', value: '\$612'),
-              ),
-              Expanded(
-                child: _MiniStat(label: 'Service', value: '\$420'),
-              ),
-              Expanded(
-                child: _MiniStat(label: 'Other', value: '\$252'),
-              ),
+            children: [
+              Expanded(child: _MiniStat(label: 'Fuel', value: fuel)),
+              Expanded(child: _MiniStat(label: 'Service', value: service)),
+              Expanded(child: _MiniStat(label: 'Other', value: other)),
             ],
           ),
         ],
@@ -236,16 +330,10 @@ class _MiniStat extends StatelessWidget {
 }
 
 class _MonthlyBars extends StatelessWidget {
-  const _MonthlyBars();
+  const _MonthlyBars({required this.labels, required this.values});
 
-  static const bars = [
-    ('Oct', 0.55),
-    ('Nov', 0.72),
-    ('Dec', 0.48),
-    ('Jan', 0.85),
-    ('Feb', 0.64),
-    ('Mar', 0.78),
-  ];
+  final List<String> labels;
+  final List<double> values;
 
   @override
   Widget build(BuildContext context) {
@@ -268,13 +356,13 @@ class _MonthlyBars extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                for (var i = 0; i < bars.length; i++) ...[
+                for (var i = 0; i < labels.length; i++) ...[
                   if (i > 0) const SizedBox(width: 10),
                   Expanded(
                     child: _BarColumn(
-                      label: bars[i].$1,
-                      heightFactor: bars[i].$2,
-                      highlight: i == bars.length - 1,
+                      label: labels[i],
+                      heightFactor: values[i].clamp(0.05, 1.0),
+                      highlight: i == labels.length - 1,
                     ),
                   ),
                 ],
@@ -342,14 +430,9 @@ class _BarColumn extends StatelessWidget {
 }
 
 class _CategoryBreakdown extends StatelessWidget {
-  const _CategoryBreakdown();
+  const _CategoryBreakdown({required this.categories});
 
-  static const categories = [
-    ('Fuel', 0.48, AppColors.teal, '\$612'),
-    ('Maintenance', 0.33, AppColors.navy, '\$420'),
-    ('Insurance', 0.12, AppColors.amber, '\$154'),
-    ('Other', 0.07, AppColors.coral, '\$98'),
-  ];
+  final List<(String, double, Color, String)> categories;
 
   @override
   Widget build(BuildContext context) {
@@ -370,7 +453,7 @@ class _CategoryBreakdown extends StatelessWidget {
                 child: CustomPaint(
                   painter: _RingPainter(
                     segments: categories
-                        .map((c) => (c.$2, c.$3))
+                        .map((c) => (c.$2 <= 0 ? 0.01 : c.$2, c.$3))
                         .toList(growable: false),
                   ),
                   child: Center(
@@ -480,30 +563,38 @@ class _RingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _RingPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _RingPainter oldDelegate) => true;
 }
 
 class _InsightRow extends StatelessWidget {
-  const _InsightRow();
+  const _InsightRow({
+    required this.mpg,
+    required this.costPer,
+    required this.unit,
+  });
+
+  final String mpg;
+  final String costPer;
+  final String unit;
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    return Row(
       children: [
         Expanded(
           child: _InsightCard(
-            title: 'Best MPG week',
-            value: '34.1',
-            subtitle: 'Feb 10–16',
+            title: 'Avg MPG',
+            value: mpg,
+            subtitle: 'From fuel logs',
             icon: Icons.speed_rounded,
           ),
         ),
-        SizedBox(width: 12),
+        const SizedBox(width: 12),
         Expanded(
           child: _InsightCard(
-            title: 'Cost / mile',
-            value: '\$0.31',
-            subtitle: 'This month',
+            title: 'Cost / $unit',
+            value: costPer,
+            subtitle: 'This history',
             icon: Icons.route_rounded,
           ),
         ),
@@ -534,10 +625,7 @@ class _InsightCard extends StatelessWidget {
         children: [
           Icon(icon, size: 20, color: AppColors.tealDeep),
           const SizedBox(height: 12),
-          Text(
-            title,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          Text(title, style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 4),
           Text(
             value,

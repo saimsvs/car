@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.cartrack.car_track"
+    namespace = "com.forgetech.car"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.cartrack.car_track"
+        applicationId = "com.forgetech.car"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
