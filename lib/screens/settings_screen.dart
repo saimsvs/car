@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../data/app_store.dart';
 import '../data/backup_service.dart';
+import '../data/notification_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/motion.dart';
@@ -84,13 +85,22 @@ class SettingsScreen extends StatelessWidget {
                           _SettingRowData(
                             icon: Icons.notifications_outlined,
                             title: 'Reminders',
-                            subtitle: 'Service & expense alerts',
+                            subtitle: store.prefs.remindersEnabled
+                                ? 'Alerts 3 days before and on the due date'
+                                : 'Service alerts are off',
                             trailing: Switch.adaptive(
                               value: store.prefs.remindersEnabled,
-                              onChanged: (v) => store.setRemindersEnabled(v),
+                              onChanged: (v) =>
+                                  _toggleReminders(context, store, v),
                               activeThumbColor: Colors.white,
                               activeTrackColor: AppColors.teal,
                             ),
+                          ),
+                          _SettingRowData(
+                            icon: Icons.notifications_active_outlined,
+                            title: 'Test notification',
+                            subtitle: 'Check alerts reach this device',
+                            onTap: () => _sendTestNotification(context),
                           ),
                           _SettingRowData(
                             icon: Icons.attach_money_rounded,
@@ -202,6 +212,68 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _toggleReminders(
+  BuildContext context,
+  AppStore store,
+  bool value,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  if (!value) {
+    await store.setRemindersEnabled(false);
+    return;
+  }
+
+  if (!NotificationService.instance.isSupported) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('This device does not support notifications'),
+      ),
+    );
+    return;
+  }
+
+  final granted = await NotificationService.instance.requestPermission();
+  if (!granted) {
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Allow notifications in system settings to get reminders',
+        ),
+      ),
+    );
+    return;
+  }
+
+  await store.setRemindersEnabled(true);
+  final pending = await NotificationService.instance.pendingCount();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(
+        pending == 0
+            ? 'Reminders on. Add a reminder to get alerts.'
+            : '$pending alert${pending == 1 ? '' : 's'} scheduled',
+      ),
+    ),
+  );
+}
+
+Future<void> _sendTestNotification(BuildContext context) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final granted = await NotificationService.instance.requestPermission();
+  if (!granted) {
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Notifications are not permitted yet')),
+    );
+    return;
+  }
+  final sent = await NotificationService.instance.sendTestNotification();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(sent ? 'Test notification sent' : 'Could not send it'),
+    ),
+  );
 }
 
 Future<void> _editProfile(BuildContext context, AppStore store) async {

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import 'notification_service.dart';
 
 class AppStore extends ChangeNotifier {
   static const _key = 'car_track_v1';
@@ -51,6 +52,16 @@ class AppStore extends ChangeNotifier {
     activeVehicleId ??= vehicles.first.id;
     ready = true;
     notifyListeners();
+    await syncNotifications();
+  }
+
+  /// Rebuilds the scheduled notifications from the current reminders.
+  Future<void> syncNotifications() async {
+    await NotificationService.instance.syncReminders(
+      reminders: reminders,
+      vehicleNames: {for (final v in vehicles) v.id: v.name},
+      enabled: prefs.remindersEnabled,
+    );
   }
 
   Future<void> _persist() async {
@@ -178,6 +189,8 @@ class AppStore extends ChangeNotifier {
     }
     notifyListeners();
     await _persist();
+    // Reminder notifications name the vehicle, so a rename changes their text.
+    await syncNotifications();
   }
 
   /// Removes a vehicle along with everything logged against it.
@@ -190,6 +203,7 @@ class AppStore extends ChangeNotifier {
     if (activeVehicleId == id) activeVehicleId = vehicles.first.id;
     notifyListeners();
     await _persist();
+    await syncNotifications();
     return true;
   }
 
@@ -225,6 +239,7 @@ class AppStore extends ChangeNotifier {
     reminders.add(r);
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   Future<void> updateReminder(ReminderItem r) async {
@@ -233,12 +248,14 @@ class AppStore extends ChangeNotifier {
     reminders[i] = r;
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   Future<void> deleteReminder(String id) async {
     reminders.removeWhere((e) => e.id == id);
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   Future<void> completeReminder(String id) async {
@@ -258,6 +275,7 @@ class AppStore extends ChangeNotifier {
     r.done = done;
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   Future<void> updatePrefs(AppPrefs p) async {
@@ -270,6 +288,7 @@ class AppStore extends ChangeNotifier {
     prefs.remindersEnabled = value;
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   List<ExpenseLog> logsForVehicle([String? vehicleId]) {
@@ -390,6 +409,7 @@ class AppStore extends ChangeNotifier {
     }
     notifyListeners();
     await _persist();
+    await syncNotifications();
   }
 
   String newId() => _id();
